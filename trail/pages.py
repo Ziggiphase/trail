@@ -12,9 +12,10 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDoubleSpinBox,
                                QPushButton, QScrollArea, QSpinBox, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
-from . import __version__, activity, icons, theme
+from . import __version__, activity, config, icons, theme
 from .heatmap import HeatmapWidget
 from .settings import Settings, TrackedApp
+from .signin import open_url
 from .stats import (Data, best_streak, by_app, current_streak, fmt_duration,
                     fmt_hours, range_total, week_start)
 from .widgets import (AppBars, Card, GoalRing, Pill, StatCard, Toggle, WeekBars,
@@ -92,7 +93,7 @@ class DashboardPage(Page):
 
     def __init__(self):
         super().__init__()
-        # setup banner (only until a database is connected)
+        # setup banner (only while not signed in)
         self.banner = Card()
         self.banner.setStyleSheet(f"QFrame#Card {{ background: {theme.ACCENT_SOFT}; "
                                   f"border-color: #29466f; }}")
@@ -101,15 +102,15 @@ class DashboardPage(Page):
         ic.setPixmap(icons.pixmap("cloud", theme.ACCENT_HOVER, 22))
         b.addWidget(ic)
         txt = QVBoxLayout()
-        txt.addWidget(label("Finish setting up Trail", "SectionTitle"))
-        txt.addWidget(label("Choose the apps that count as deep work and connect your free "
-                            "cloud database so your history is saved.", "Muted", wrap=True))
+        txt.addWidget(label("Sign in to save your trail", "SectionTitle"))
+        txt.addWidget(label("You're tracking without an account, so your time stays on this PC. "
+                            "Sign in to keep it safe and see it on any computer.", "Muted", wrap=True))
         b.addLayout(txt, 1)
         apps_btn = QPushButton("Choose apps")
         apps_btn.clicked.connect(lambda: self.go_to.emit("apps"))
-        db_btn = QPushButton("Connect database")
+        db_btn = QPushButton("Sign in")
         db_btn.setObjectName("Primary")
-        db_btn.clicked.connect(lambda: self.go_to.emit("settings"))
+        db_btn.clicked.connect(lambda: self.go_to.emit("signin"))
         b.addWidget(apps_btn)
         b.addWidget(db_btn)
         self.banner.body.addLayout(b)
@@ -448,11 +449,15 @@ class AppsPage(Page):
 # ======================================================================= Settings
 class SettingsPage(Page):
     title = "Settings"
-    subtitle = "Goal, reminders, startup and cloud sync"
+    subtitle = "Account, goal, reminders and startup"
     changed = Signal(object)                 # new Settings (applied immediately)
     autostart_changed = Signal(bool)
-    connect_requested = Signal(str, str)     # url, device name
-    test_requested = Signal(str)
+    sign_in_requested = Signal()
+    sign_out_requested = Signal()
+    delete_requested = Signal()
+    device_changed = Signal(str)
+    import_requested = Signal(str)           # old Neon database link
+    check_updates_requested = Signal()
     export_requested = Signal()
     open_folder_requested = Signal()
 
@@ -460,6 +465,46 @@ class SettingsPage(Page):
         super().__init__()
         self._s: Settings | None = None
         self._loading = False
+
+        # --- account
+        ac = self._section("Account", "cloud")
+        self.acct_title = label("", "SectionTitle")
+        self.acct_sub = label("", "Muted", wrap=True)
+        t = QVBoxLayout()
+        t.setSpacing(2)
+        t.addWidget(self.acct_title)
+        t.addWidget(self.acct_sub)
+        self.btn_signin = QPushButton("Sign in")
+        self.btn_signin.setObjectName("Primary")
+        self.btn_signin.clicked.connect(self.sign_in_requested.emit)
+        self.btn_signout = QPushButton("Sign out")
+        self.btn_signout.clicked.connect(self.sign_out_requested.emit)
+        h = QHBoxLayout()
+        h.addLayout(t, 1)
+        h.addWidget(self.btn_signin, 0, Qt.AlignVCenter)
+        h.addWidget(self.btn_signout, 0, Qt.AlignVCenter)
+        ac.body.addLayout(h)
+        ac._rows = 1
+        self.device = QLineEdit()
+        self.device.setFixedWidth(220)
+        self.device.editingFinished.connect(lambda: self.device_changed.emit(self.device.text().strip()))
+        self._row(ac, "This computer's name",
+                  "Sign in on several PCs with the same account; totals are combined.", self.device)
+        self.legacy_wrap = QWidget()
+        lw = QHBoxLayout(self.legacy_wrap)
+        lw.setContentsMargins(0, 0, 0, 0)
+        self.legacy_url = QLineEdit()
+        self.legacy_url.setEchoMode(QLineEdit.Password)
+        self.legacy_url.setPlaceholderText("postgresql://… (your old Neon link)")
+        self.legacy_url.setMinimumWidth(300)
+        self.btn_import = QPushButton("Import")
+        self.btn_import.clicked.connect(lambda: self.import_requested.emit(self.legacy_url.text().strip()))
+        lw.addWidget(self.legacy_url, 1)
+        lw.addWidget(self.btn_import)
+        self.legacy_row_title = "Bring over earlier history"
+        self._row(ac, self.legacy_row_title,
+                  "If you used Trail with your own Neon database before, copy that history into your account.",
+                  self.legacy_wrap)
 
         # --- goal
         goal = self._section("Goal & streak", "target")
@@ -506,40 +551,6 @@ class SettingsPage(Page):
         self._row(nt, "Streak reminder",
                   "If you haven't hit your streak minimum by this time, Trail nudges you.", wrap)
 
-        # --- cloud
-        cl = self._section("Cloud sync", "cloud")
-        self.db = QLineEdit()
-        self.db.setEchoMode(QLineEdit.Password)
-        self.db.setPlaceholderText("postgresql://user:password@host/dbname?sslmode=require")
-        self.db.setMinimumWidth(420)
-        show = icon_button("eye", "Show / hide")
-        show.setCheckable(True)
-        show.toggled.connect(lambda on: self.db.setEchoMode(QLineEdit.Normal if on else QLineEdit.Password))
-        dbw = QWidget()
-        dbl = QHBoxLayout(dbw)
-        dbl.setContentsMargins(0, 0, 0, 0)
-        dbl.addWidget(self.db, 1)
-        dbl.addWidget(show)
-        self._row(cl, "Database link",
-                  "Free Postgres: neon.tech → New project → Connect → copy the connection string.", dbw)
-        self.device = QLineEdit()
-        self.device.setFixedWidth(220)
-        self._row(cl, "This computer's name",
-                  "Use Trail on several PCs with one database; each is labelled by this name.",
-                  self.device)
-        btns = QHBoxLayout()
-        self.cloud_status = label("", "Muted", wrap=True)
-        btns.addWidget(self.cloud_status, 1)
-        test = QPushButton("Test")
-        test.clicked.connect(lambda: self.test_requested.emit(self.db.text().strip()))
-        save = QPushButton("Save & connect")
-        save.setObjectName("Primary")
-        save.clicked.connect(lambda: self.connect_requested.emit(self.db.text().strip(),
-                                                                 self.device.text().strip()))
-        btns.addWidget(test)
-        btns.addWidget(save)
-        cl.body.addLayout(btns)
-
         # --- data & privacy
         dp = self._section("Your data & privacy", "download")
         dp.body.addWidget(label(
@@ -553,11 +564,32 @@ class SettingsPage(Page):
         of.setIcon(icons.icon("folder"))
         of.setToolTip(data_folder)
         of.clicked.connect(self.open_folder_requested.emit)
-        dp.body.addLayout(row(ex, of, None))
+        self.btn_delete = QPushButton("  Delete my cloud data")
+        self.btn_delete.setObjectName("Danger")
+        self.btn_delete.setIcon(icons.icon("trash", theme.DANGER))
+        self.btn_delete.clicked.connect(self.delete_requested.emit)
+        pp = QPushButton("Privacy policy")
+        pp.setObjectName("Link")
+        pp.clicked.connect(lambda: open_url(config.PRIVACY_URL))
+        dp.body.addLayout(row(ex, of, self.btn_delete, None, pp))
 
         # --- about
         ab = self._section("About", "info")
-        ab.body.addWidget(label(f"Trail {__version__} · small daily decisions, made visible.", "Muted"))
+        self.update_status = label("", "Faint")
+        chk = QPushButton("Check for updates")
+        chk.clicked.connect(self.check_updates_requested.emit)
+        site = QPushButton("Website")
+        site.setObjectName("Link")
+        site.clicked.connect(lambda: open_url(config.WEBSITE_URL))
+        about = QVBoxLayout()
+        about.setSpacing(2)
+        about.addWidget(label(f"Trail {__version__} · small daily decisions, made visible."))
+        about.addWidget(self.update_status)
+        h2 = QHBoxLayout()
+        h2.addLayout(about, 1)
+        h2.addWidget(site)
+        h2.addWidget(chk)
+        ab.body.addLayout(h2)
         self.lay.addStretch()
 
     def _section(self, title: str, icon_name: str) -> Card:
@@ -590,13 +622,26 @@ class SettingsPage(Page):
         self.n_goal.setChecked(s.notify_goal)
         self.n_streak.setChecked(s.notify_streak)
         self.rem_hour.setCurrentIndex(max(0, self.rem_hour.findData(s.reminder_hour)))
-        self.db.setText(s.database_url)
         self.device.setText(s.device_name)
+        if s.database_url and not self.legacy_url.text():
+            self.legacy_url.setText(s.database_url)
         self._loading = False
 
-    def set_cloud_status(self, text: str, color: str = theme.MUTED) -> None:
-        self.cloud_status.setText(text)
-        self.cloud_status.setStyleSheet(f"color: {color};")
+    def set_update_status(self, text: str) -> None:
+        self.update_status.setText(text)
+
+    def set_account(self, email: str | None, status: str = "", color: str = theme.MUTED) -> None:
+        if email:
+            self.acct_title.setText(email)
+        else:
+            self.acct_title.setText("Not signed in")
+            status = status or "Your time is kept on this PC. Sign in to save it and see it everywhere."
+        self.acct_sub.setText(status)
+        self.acct_sub.setStyleSheet(f"color: {color};")
+        self.btn_signin.setVisible(not email)
+        self.btn_signout.setVisible(bool(email))
+        self.btn_delete.setEnabled(bool(email))
+        self.btn_import.setEnabled(bool(email))
 
     def _emit(self, *_a) -> None:
         if self._loading or not self._s:

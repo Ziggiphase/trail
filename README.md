@@ -1,12 +1,25 @@
 # Trail
 
-**Small daily decisions, made visible.** Trail runs quietly in your system tray,
+**Small daily decisions, made visible.** · [Website](https://ziggiphase.github.io/trail/) · [Download](https://github.com/Ziggiphase/trail/releases/latest/download/Trail-Setup.exe)
+
+Trail runs quietly in your system tray,
 counts the time you spend in the apps you choose (VS Code, terminals, Docker,
 Jupyter…), and turns it into a GitHub-style trail of green squares, with a daily
-goal, streaks and per-app breakdowns. Your history is saved to a free cloud
-Postgres database (Neon recommended).
+goal, streaks and per-app breakdowns. Sign in with Google or email and your
+history is saved and synced across your computers. It updates itself.
 
-## Install on Windows
+## Install
+
+Download **Trail-Setup.exe** from the [website](https://ziggiphase.github.io/trail/) and run it.
+If Windows shows "Windows protected your PC", click **More info → Run anyway** (the app isn't code-signed yet).
+
+## Maintainers
+
+First-time backend, website and release setup: see **[SETUP.md](SETUP.md)**.
+To release a new version: publish a GitHub Release with a tag like `v1.2.0`; the installer is
+built and attached automatically, and installed copies update themselves.
+
+## Build the installer yourself
 
 **Build the installer once on your PC (about 3 minutes):**
 1. Double-click **`BUILD-INSTALLER.bat`**. It finds your Python (python.org or
@@ -39,13 +52,13 @@ in `.github/workflows` builds the installer on every push; download it from the
 - Closing the window keeps Trail running in the tray (bottom-right; click ^ if
   hidden). Right-click the tray icon to quit.
 
-## Connect the free database
+## Accounts
 
-1. Sign up at neon.tech → create a project → **Connect** → copy the connection string.
-2. In Trail: **Settings → Cloud sync**, paste it, click **Test**, then **Save & connect**.
+Sign in with **Google** or your **email** (a sign-in link, or a 6-digit code). Your history is
+saved to your account and combined across every computer you sign in on. Prefer not to? Choose
+**Continue without an account**: your time stays on your PC and uploads if you sign in later.
 
-Until you connect, Trail keeps your time on this PC and uploads it once connected.
-Use the same link on other computers and give each one its own name; totals are combined.
+Used Trail 1.0 with your own Neon database? **Settings → Account → Bring over earlier history**.
 
 ## Built in, so you don't have to think about it
 
@@ -79,9 +92,13 @@ trail/
   heatmap.py    year graph
   tracker.py    what counts (pure logic, tested)
   activity.py   foreground window, idle time, open apps (Windows/macOS/Linux)
-  storage.py    Postgres sync      outbox.py  crash-safe buffer
+  auth.py       sign-in (Google / email, PKCE)   cloud.py   sync with Supabase
+  signin.py     sign-in screen     updater.py  self-update from GitHub Releases
+  storage.py    import from an old Neon database   outbox.py  crash-safe buffer
   stats.py      streaks, totals    settings.py  saved settings, start at sign-in
   theme.py, icons.py   look and feel
+supabase/       schema.sql: tables + security rules (run once)
+website/        landing page + privacy policy (GitHub Pages)
 packaging/      icon + Inno Setup script
 build.ps1, BUILD-INSTALLER.bat
 ```

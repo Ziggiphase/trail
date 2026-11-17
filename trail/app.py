@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import getpass
 import logging
+import os
 import sys
 import threading
 from dataclasses import replace
@@ -18,11 +19,14 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QFileDialog, QFrame,
                                QPushButton, QStackedWidget, QSystemTrayIcon,
                                QVBoxLayout, QWidget)
 
-from . import __version__, config, icons, theme
+from . import __version__, config, icons, theme, updater
 from . import settings as settings_mod
+from .auth import AuthError, CallbackServer, SupabaseAuth, TokenStore
+from .cloud import CloudClient, CloudError
 from .dialogs import AddAppsDialog, EditAppDialog
 from .outbox import Outbox
 from .pages import ActivityPage, AppsPage, DashboardPage, SettingsPage, View
+from .signin import SignInScreen, open_url
 from .stats import by_day, current_streak, fmt_duration, merge
 from .tracker import Tracker
 from .widgets import Dot, Pill, label
@@ -37,7 +41,15 @@ def data_folder() -> Path:
 class Bridge(QObject):
     """Carries results from background threads to the UI thread."""
     synced = Signal(object, str)        # cloud data (or None), status text
-    tested = Signal(object)             # None = ok, else error text
+    email_sent = Signal(str)
+    auth_error = Signal(str)
+    signed_in = Signal(object)          # Session
+    callback = Signal(object, object)   # code, error  (from the browser)
+    done = Signal(str, object)          # task name, error text or None
+    update_found = Signal(object)       # updater.Release
+    update_progress = Signal(int)
+    update_ready = Signal(object)       # installer path
+    update_failed = Signal(str)
 
 
 class GoalLine(QWidget):
@@ -80,6 +92,7 @@ class MainWindow(QMainWindow):
         self.tracker = tracker or Tracker(settings.rules(), idle_after=settings.idle_minutes * 60)
         self.outbox = Outbox(data_folder())
         self.tracker.restore(self.outbox.load())        # time saved before a crash/shutdown
+        self.auth = SupabaseAuth(TokenStore(data_folder()))
         self.cloud: dict = {}
         self.store = None
         self.quitting = False
@@ -89,9 +102,21 @@ class MainWindow(QMainWindow):
         self.sync_text = ""
         self._ticks = 0
         self._sync_lock = threading.Lock()
+        self.release: updater.Release | None = None
+        self._update_notified: str | None = None
         self.bridge = Bridge()
         self.bridge.synced.connect(self._on_synced)
-        self.bridge.tested.connect(self._on_tested)
+        self.bridge.email_sent.connect(self._on_email_sent)
+        self.bridge.auth_error.connect(self._on_auth_error)
+        self.bridge.signed_in.connect(self._on_signed_in)
+        self.bridge.callback.connect(self._on_callback)
+        self.bridge.done.connect(self._on_task_done)
+        self.bridge.update_found.connect(self._on_update_found)
+        self.bridge.update_progress.connect(
+            lambda pct: self.btn_update.setText(f"  Downloading… {pct}%"))
+        self.bridge.update_ready.connect(self._install_update)
+        self.bridge.update_failed.connect(self._on_update_failed)
+        self.callback_server = CallbackServer(lambda code, err: self.bridge.callback.emit(code, err))
 
         self.setWindowTitle("Trail")
         self.setWindowIcon(icons.logo_icon())
@@ -115,8 +140,12 @@ class MainWindow(QMainWindow):
         s = p["settings"]
         s.changed.connect(self.apply_settings)
         s.autostart_changed.connect(self.set_autostart)
-        s.connect_requested.connect(self.connect_database)
-        s.test_requested.connect(self.test_database)
+        s.sign_in_requested.connect(lambda: self.show_signin(inside_app=True))
+        s.sign_out_requested.connect(self.sign_out)
+        s.delete_requested.connect(self.delete_cloud_data)
+        s.device_changed.connect(self.set_device_name)
+        s.import_requested.connect(self.import_legacy)
+        s.check_updates_requested.connect(lambda: self.check_updates(manual=True))
         s.export_requested.connect(self.export_csv)
         s.open_folder_requested.connect(
             lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(data_folder()))))
@@ -124,8 +153,10 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._build_tray()
-        self._apply_database()
+        self._apply_account()
         self.go_to("dashboard")
+        if not self.auth.signed_in and not self.settings.offline_mode:
+            self.show_signin(inside_app=False)
 
         self.sample_timer = QTimer(self, interval=config.SAMPLE_SECONDS * 1000)
         self.sample_timer.timeout.connect(self._on_sample)
@@ -134,6 +165,11 @@ class MainWindow(QMainWindow):
         self.sync_timer.timeout.connect(self.sync)
         self.sync_timer.start()
         self.sync()
+
+        self.update_timer = QTimer(self, interval=config.UPDATE_CHECK_HOURS * 3600 * 1000)
+        self.update_timer.timeout.connect(self.check_updates)
+        self.update_timer.start()
+        QTimer.singleShot(15_000, self.check_updates)
 
     # ================================================================ layout
     def _build_ui(self) -> None:
@@ -155,7 +191,19 @@ class MainWindow(QMainWindow):
         body.addLayout(right, 1)
         outer.addLayout(body, 1)
         outer.addWidget(self._build_statusbar())
-        self.setCentralWidget(root)
+
+        self.signin = SignInScreen()
+        self.signin.google.connect(self.sign_in_google)
+        self.signin.send_email.connect(self.sign_in_email)
+        self.signin.verify_code.connect(self.verify_email_code)
+        self.signin.skip.connect(self.continue_offline)
+        self.signin.back.connect(self.show_shell)
+        self.root_stack = QStackedWidget()
+        self.root_stack.addWidget(self.signin)
+        self.root_stack.addWidget(root)
+        self.shell = root
+        self.root_stack.setCurrentWidget(root)
+        self.setCentralWidget(self.root_stack)
 
     def _build_sidebar(self) -> QFrame:
         side = QFrame()
@@ -241,6 +289,12 @@ class MainWindow(QMainWindow):
         self.btn_resume.setIcon(icons.icon("play", "white", 14))
         self.btn_resume.clicked.connect(self.resume)
         self.btn_resume.hide()
+        self.btn_update = QPushButton()
+        self.btn_update.setObjectName("Update")
+        self.btn_update.setIcon(icons.icon("download", "#7ee2a0", 15))
+        self.btn_update.clicked.connect(self.offer_update)
+        self.btn_update.hide()
+        lay.addWidget(self.btn_update)
         sync_btn = QPushButton("  Sync now")
         sync_btn.setIcon(icons.icon("sync", theme.TEXT, 15))
         sync_btn.clicked.connect(self.sync)
@@ -289,6 +343,9 @@ class MainWindow(QMainWindow):
 
     # ================================================================ navigation
     def go_to(self, key: str) -> None:
+        if key == "signin":
+            self.show_signin(inside_app=True)
+            return
         if key.startswith("day:"):
             self.go_to("activity")
             self.pages["activity"].show_day(date.fromisoformat(key[4:]))
@@ -299,6 +356,17 @@ class MainWindow(QMainWindow):
         self.nav_buttons[key].setChecked(True)
         self.page_title.setText(page.title)
         self.page_sub.setText(page.subtitle)
+        self.refresh()
+
+    def show_signin(self, inside_app: bool) -> None:
+        self.signin.reset()
+        self.signin.set_mode(inside_app)
+        self.root_stack.setCurrentWidget(self.signin)
+        self.show_window()
+
+    def show_shell(self) -> None:
+        self.callback_server.stop()
+        self.root_stack.setCurrentWidget(self.shell)
         self.refresh()
 
     def show_window(self) -> None:
@@ -312,7 +380,7 @@ class MainWindow(QMainWindow):
         return View(data=data, days=by_day(data), today=date.today(), settings=self.settings,
                     current_app=self.tracker.current_app, counting=self.tracker.is_productive,
                     paused=self.is_paused(), recent=self.tracker.recent_apps(),
-                    connected=bool(self.settings.database_url))
+                    connected=self.auth.signed_in)
 
     def refresh(self) -> None:
         v = self.view()
@@ -349,12 +417,12 @@ class MainWindow(QMainWindow):
         self.btn_resume.setVisible(v.paused)
         self.act_resume.setVisible(v.paused)
 
-        if not self.settings.database_url:
+        if not self.auth.signed_in:
             self.dot_cloud.set_color(theme.WARNING)
-            self.lbl_cloud.setText("Not connected · time is kept on this PC until you connect")
+            self.lbl_cloud.setText("Not signed in · time is kept on this PC")
         else:
             self.dot_cloud.set_color({True: theme.SUCCESS, False: theme.DANGER}.get(self.sync_ok, theme.FAINT))
-            self.lbl_cloud.setText(self.sync_text or "Connecting…")
+            self.lbl_cloud.setText(f"{self.auth.session.email}   ·   {self.sync_text or 'Connecting…'}")
         self.lbl_device.setText(f"·   {self.settings.device_name}   ·   v{__version__}")
         self.tray.setToolTip(f"Trail · {fmt_duration(today)} today"
                              + (" (paused)" if v.paused else ""))
@@ -484,38 +552,238 @@ class MainWindow(QMainWindow):
             log.warning("autostart failed: %s", exc)
             QMessageBox.warning(self, "Trail", f"Couldn't change the startup setting:\n{exc}")
 
-    def connect_database(self, url: str, device: str) -> None:
-        if self.settings.database_url and url != self.settings.database_url:
-            self._sync_blocking()          # send pending time to the old database first
+    # ================================================================ account
+    def _apply_account(self) -> None:
+        if self.auth.signed_in:
+            self.store = CloudClient(self.auth, self.settings.device_name)
+            self.sync_ok, self.sync_text = None, "Connecting…"
+            self.pages["settings"].set_account(self.auth.session.email, "Signed in · syncing every 10 minutes")
+        else:
+            self.store = None
+            self.pages["settings"].set_account(None)
+
+    def _bg(self, fn, *args) -> None:
+        threading.Thread(target=fn, args=args, daemon=True).start()
+
+    def sign_in_google(self) -> None:
+        try:
+            self.callback_server.start()
+        except AuthError as exc:
+            self.signin.show_error(str(exc))
+            return
+        open_url(self.auth.oauth_url("google"))
+
+    def sign_in_email(self, email: str) -> None:
+        try:
+            self.callback_server.start()       # the email link comes back here
+        except AuthError as exc:
+            self.signin.show_error(str(exc))
+            return
+
+        def work():
+            try:
+                self.auth.send_email(email)
+                self.bridge.email_sent.emit(email)
+            except AuthError as exc:
+                self.bridge.auth_error.emit(str(exc))
+        self._bg(work)
+
+    def verify_email_code(self, email: str, code: str) -> None:
+        def work():
+            try:
+                self.bridge.signed_in.emit(self.auth.verify_code(email, code))
+            except AuthError as exc:
+                self.bridge.auth_error.emit(str(exc))
+        self._bg(work)
+
+    def _on_callback(self, code, err) -> None:
+        if err or not code:
+            self.signin.show_error(f"Sign-in didn't finish: {err}")
+            return
+        self.signin.set_busy(True, "Finishing sign-in…")
+
+        def work():
+            try:
+                self.bridge.signed_in.emit(self.auth.exchange(code))
+            except AuthError as exc:
+                self.bridge.auth_error.emit(str(exc))
+        self._bg(work)
+
+    def _on_email_sent(self, email: str) -> None:
+        self.signin.show_sent(email)
+
+    def _on_auth_error(self, msg: str) -> None:
+        self.signin.show_error(msg)
+
+    def _on_signed_in(self, session) -> None:
+        self.callback_server.stop()
         self.cloud = {}
-        self._save(replace(self.settings, database_url=url,
-                           device_name=device or config.DEVICE_NAME))
-        self._apply_database()
-        self.pages["settings"].set_cloud_status("Connecting…")
+        self._save(replace(self.settings, offline_mode=False))
+        self._apply_account()
+        self.show_shell()
+        self.show_window()
+        self.notify("Signed in to Trail", f"Your trail now syncs to {session.email}.")
         self.sync()
 
-    def test_database(self, url: str) -> None:
-        if not url:
-            self.pages["settings"].set_cloud_status("Paste a connection string first.", theme.WARNING)
+    def continue_offline(self) -> None:
+        self._save(replace(self.settings, offline_mode=True))
+        self.show_shell()
+
+    def sign_out(self) -> None:
+        if QMessageBox.question(self, "Sign out", "Sign out of Trail on this computer?\n\n"
+                                "Your saved history stays in your account.") != QMessageBox.Yes:
             return
-        self.pages["settings"].set_cloud_status("Testing…")
+        self._sync_blocking()                 # send the last minutes first
+        self.auth.sign_out()
+        self.cloud = {}
+        self._apply_account()
+        self.show_signin(inside_app=False)
+
+    def set_device_name(self, name: str) -> None:
+        name = name or config.DEVICE_NAME
+        if name != self.settings.device_name:
+            self._save(replace(self.settings, device_name=name))
+            if isinstance(self.store, CloudClient):
+                self.store.device = name
+
+    def delete_cloud_data(self) -> None:
+        if not isinstance(self.store, CloudClient):
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("Delete cloud data")
+        box.setText("Delete all your Trail history from the cloud?")
+        box.setInformativeText("This removes every day of tracked time from your account, on all "
+                               "your computers. It can't be undone. Export to CSV first if you want a copy.")
+        box.setStandardButtons(QMessageBox.Cancel | QMessageBox.Yes)
+        box.button(QMessageBox.Yes).setText("Delete everything")
+        if box.exec() != QMessageBox.Yes:
+            return
+        store = self.store
+
+        def work():
+            try:
+                store.delete_my_data()
+                self.bridge.done.emit("delete", None)
+            except CloudError as exc:
+                self.bridge.done.emit("delete", str(exc))
+        self._bg(work)
+
+    def import_legacy(self, url: str) -> None:
+        if not isinstance(self.store, CloudClient) or not url:
+            return
+        if self.settings.legacy_imported:
+            QMessageBox.information(self, "Trail", "Your earlier history was already imported.")
+            return
+        self.pages["settings"].set_account(self.auth.session.email, "Importing earlier history…")
+        store = self.store
 
         def work():
             try:
                 from .storage import CloudStore
-                CloudStore(url).init_schema()
-                self.bridge.tested.emit(None)
+                old = CloudStore(url).daily_app_totals(days=36500)
+                store.push(old)
+                self.bridge.done.emit("import", None)
             except Exception as exc:
-                msg = str(exc).strip().splitlines()[0][:180] if str(exc).strip() else type(exc).__name__
-                self.bridge.tested.emit(msg)
+                self.bridge.done.emit("import", str(exc).splitlines()[0][:200] if str(exc) else type(exc).__name__)
+        self._bg(work)
 
-        threading.Thread(target=work, daemon=True).start()
+    def _on_task_done(self, task: str, err) -> None:
+        email = self.auth.session.email if self.auth.session else None
+        if task == "delete":
+            if err:
+                self.pages["settings"].set_account(email, f"Couldn't delete: {err}", theme.DANGER)
+            else:
+                self.cloud = {}
+                self.pages["settings"].set_account(email, "All cloud data deleted.", theme.SUCCESS)
+        elif task == "import":
+            if err:
+                self.pages["settings"].set_account(email, f"Import failed: {err}", theme.DANGER)
+            else:
+                self._save(replace(self.settings, legacy_imported=True, database_url=""))
+                self.pages["settings"].set_account(email, "✓ Earlier history imported.", theme.SUCCESS)
+                self.sync()
+        self.refresh()
 
-    def _on_tested(self, err) -> None:
-        if err is None:
-            self.pages["settings"].set_cloud_status("✓ Connection works. Click Save & connect.", theme.SUCCESS)
-        else:
-            self.pages["settings"].set_cloud_status(f"✗ {err}", theme.DANGER)
+    # ================================================================ updates
+    def check_updates(self, manual: bool = False) -> None:
+        api = os.getenv("TRAIL_GITHUB_API", "https://api.github.com")
+
+        def work():
+            try:
+                rel = updater.check(api=api)
+                if rel:
+                    self.bridge.update_found.emit(rel)
+                elif manual:
+                    self.bridge.update_failed.emit(f"You're on the latest version ({__version__}).")
+            except Exception as exc:
+                log.info("update check failed: %s", exc)
+                if manual:
+                    self.bridge.update_failed.emit("Couldn't check for updates. Are you online?")
+        self._bg(work)
+
+    def _on_update_found(self, rel) -> None:
+        self.release = rel
+        self.btn_update.setText(f"  Update to {rel.version}")
+        self.btn_update.setEnabled(True)
+        self.btn_update.show()
+        self.pages["settings"].set_update_status(f"Version {rel.version} is available.")
+        if self._update_notified != rel.version:
+            self._update_notified = rel.version
+            self.notify("A Trail update is ready", f"Version {rel.version} is available. "
+                                                   "Click Update in the top bar to install.")
+
+    def _on_update_failed(self, msg: str) -> None:
+        self.pages["settings"].set_update_status(msg)
+        if self.release:
+            self.btn_update.setEnabled(True)
+            self.btn_update.setText(f"  Update to {self.release.version}")
+
+    def offer_update(self) -> None:
+        rel = self.release
+        if not rel:
+            return
+        if not updater.can_self_update():
+            open_url(rel.page or config.WEBSITE_URL)
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("Update Trail")
+        box.setText(f"Trail {rel.version} is ready to install.")
+        notes = rel.notes[:800] + ("…" if len(rel.notes) > 800 else "")
+        box.setInformativeText((notes + "\n\n" if notes else "") +
+                               "Trail will close for a few seconds and reopen by itself. "
+                               "Your settings and history are kept.")
+        box.setStandardButtons(QMessageBox.Cancel | QMessageBox.Yes)
+        box.button(QMessageBox.Yes).setText("Install && restart")
+        box.button(QMessageBox.Cancel).setText("Later")
+        if box.exec() != QMessageBox.Yes:
+            return
+        self.btn_update.setEnabled(False)
+        self.btn_update.setText("  Downloading…")
+
+        def work():
+            try:
+                path = updater.download(rel, self.bridge.update_progress.emit)
+                self.bridge.update_ready.emit(path)
+            except Exception as exc:
+                log.warning("update download failed: %s", exc)
+                self.bridge.update_failed.emit("Download failed. Please try again.")
+        self._bg(work)
+
+    def _install_update(self, path) -> None:
+        self.btn_update.setText("  Installing…")
+        self.quitting = True
+        self.sample_timer.stop()
+        self._sync_blocking()
+        self._save_outbox()
+        try:
+            updater.launch_installer(path)
+        except OSError as exc:
+            self.quitting = False
+            self.sample_timer.start()
+            self._on_update_failed(f"Couldn't start the installer: {exc}")
+            return
+        self.tray.hide()
+        QApplication.quit()
 
     def export_csv(self) -> None:
         default = str(Path.home() / f"trail-export-{date.today():%Y-%m-%d}.csv")
@@ -531,14 +799,6 @@ class MainWindow(QMainWindow):
         self.notify("Export complete", f"Saved {Path(path).name}")
 
     # ================================================================ cloud sync
-    def _apply_database(self) -> None:
-        if not self.settings.database_url:
-            self.store = None
-            return
-        from .storage import CloudStore
-        self.store = CloudStore(self.settings.database_url, device=self.settings.device_name)
-        self.sync_ok, self.sync_text = None, "Connecting…"
-
     def _sync_blocking(self) -> None:
         store = self.store
         if store is None or not self._sync_lock.acquire(blocking=False):
@@ -550,10 +810,13 @@ class MainWindow(QMainWindow):
             store.push(batch)
             data = store.daily_app_totals()
             self.bridge.synced.emit(data, f"Synced {datetime.now():%H:%M}")
-        except Exception as exc:     # offline, database asleep, wrong link…
+        except Exception as exc:     # offline, signed out elsewhere, server problem…
             self.tracker.restore(batch)
             log.warning("sync failed: %s", exc)
-            self.bridge.synced.emit(None, "Offline · will retry, nothing is lost")
+            msg = str(exc)
+            text = ("Offline · will retry, nothing is lost" if msg in ("offline", "") or "internet" in msg
+                    else msg)
+            self.bridge.synced.emit(None, text)
         finally:
             self._sync_lock.release()
             self._save_outbox()
@@ -564,13 +827,19 @@ class MainWindow(QMainWindow):
     def _on_synced(self, data, text: str) -> None:
         self.sync_ok = data is not None
         self.sync_text = text
+        if not self.auth.signed_in:          # the session expired or was revoked
+            if isinstance(self.store, CloudClient):
+                self._apply_account()
+                self.notify("Please sign in again", "Your Trail sign-in expired. Your time is "
+                                                    "kept on this PC until you sign in.")
+            self.refresh()
+            return
+        email = self.auth.session.email
         if data is not None:
             self.cloud = data
-            self.pages["settings"].set_cloud_status(f"✓ Connected · last sync {datetime.now():%H:%M}",
-                                                    theme.SUCCESS)
+            self.pages["settings"].set_account(email, f"✓ Synced at {datetime.now():%H:%M}", theme.SUCCESS)
         else:
-            self.pages["settings"].set_cloud_status("✗ Can't reach the database right now. "
-                                                    "Check the link and your internet.", theme.DANGER)
+            self.pages["settings"].set_account(email, text, theme.DANGER)
         self.refresh()
 
     # ================================================================ lifecycle
@@ -589,6 +858,7 @@ class MainWindow(QMainWindow):
                         "It keeps running in the system tray. Right-click the icon to quit.")
 
     def quit_app(self) -> None:
+        self.callback_server.stop()
         self.quitting = True
         self.sample_timer.stop()
         self._sync_blocking()
@@ -638,5 +908,8 @@ def main() -> None:
     server.newConnection.connect(lambda: (server.nextPendingConnection(), win.show_window()))
     if "--minimized" not in sys.argv:
         win.show()
+    if "--updated" in sys.argv:
+        QTimer.singleShot(1500, lambda: win.notify("Trail was updated",
+                                                   f"You're now on version {__version__}."))
     log.info("Trail %s started", __version__)
     sys.exit(app.exec())

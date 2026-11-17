@@ -1,12 +1,15 @@
 ; Inno Setup script: turns the PyInstaller build into Trail-Setup.exe
 ; Built by build.ps1. Installs per-user (no admin prompt).
 
-#define AppVersion "1.0.0"
+#ifndef AppVersion
+  #define AppVersion "1.1.0"
+#endif
 
 [Setup]
 AppId={{B3F1A0D2-5C7E-4E8A-9A61-7D2C4E9F1B30}
 AppName=Trail
 AppVersion={#AppVersion}
+VersionInfoVersion={#AppVersion}
 AppPublisher=Trail
 AppComments=Track your deep work and see it as a trail.
 DefaultDirName={localappdata}\Programs\Trail
@@ -45,6 +48,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\Trail.exe"; Description: "Open Trail now"; Flags: nowait postinstall skipifsilent
+; After an automatic (silent) update, reopen Trail by itself
+Filename: "{app}\Trail.exe"; Parameters: "--updated"; Flags: nowait; Check: WizardSilent
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/f /im Trail.exe"; Flags: runhidden; RunOnceId: "StopTrail"

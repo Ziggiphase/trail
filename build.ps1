@@ -25,6 +25,16 @@ $py = (Resolve-Path ".\.build-venv\Scripts\python.exe").Path
 & $py -m pip install --quiet -r requirements.txt pyinstaller
 if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
 
+# Version: from the GitHub release tag (TRAIL_VERSION=1.2.0) or from trail\__init__.py
+if ($env:TRAIL_VERSION) {
+    $version = $env:TRAIL_VERSION.TrimStart("v")
+    (Get-Content trail\__init__.py) -replace '__version__ = ".*"', "__version__ = `"$version`"" |
+        Set-Content trail\__init__.py -Encoding utf8
+} else {
+    $version = (Select-String -Path trail\__init__.py -Pattern '__version__ = "(.*)"').Matches[0].Groups[1].Value
+}
+Write-Host "   version $version"
+
 Write-Host "== 2/3  Bundling the app (takes a minute or two)"
 & $py -m PyInstaller --noconfirm --clean --windowed --log-level WARN `
     --name Trail `
@@ -51,6 +61,6 @@ if (-not $iscc) {
     Write-Host "Meanwhile the app works without installing: dist\Trail\Trail.exe"
     exit 1
 }
-& $iscc /Qp packaging\installer.iss
+& $iscc /Qp "/DAppVersion=$version" packaging\installer.iss
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
 Write-Host "`nDone!  Your installer is: $PSScriptRoot\dist\Trail-Setup.exe"

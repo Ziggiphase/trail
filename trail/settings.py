@@ -46,7 +46,9 @@ class TrackedApp:
 @dataclass
 class Settings:
     apps: list[TrackedApp]
-    database_url: str = ""
+    database_url: str = ""            # old self-hosted Neon link (v1.0), kept only for importing history
+    offline_mode: bool = False        # chose "Continue without an account"
+    legacy_imported: bool = False     # Neon history already copied into the account
     idle_minutes: int = config.IDLE_AFTER_SECONDS // 60
     streak_minutes: int = config.STREAK_MIN_MINUTES
     daily_goal_minutes: int = 240

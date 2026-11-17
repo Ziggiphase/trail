@@ -1,13 +1,17 @@
 # Builds Trail-Setup.exe on GitHub's Windows machines.
-# Push this project to a GitHub repo, then open Actions → "Build Windows installer"
-# → latest run → download the "Trail-Setup" artifact.
-# Pushing a tag like v1.0.0 also attaches the installer to a GitHub Release.
+#
+# • Every push to main: builds a test installer (Actions tab → run → "Trail-Setup" artifact).
+# • Publishing a GitHub Release (tag like v1.2.0): builds with that version number and
+#   attaches Trail-Setup.exe to the release. The website's Download button and the
+#   in-app updater both pick it up automatically.
 name: Build Windows installer
 
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    paths-ignore: ["website/**", "*.md", "supabase/**"]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -25,13 +29,16 @@ jobs:
         run: choco install innosetup --no-progress -y
       - name: Build
         shell: pwsh
+        env:
+          TRAIL_VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
         run: ./build.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: Trail-Setup
           path: dist/Trail-Setup.exe
-      - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/Trail-Setup.exe
+      - name: Attach installer to the release
+        if: github.event_name == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/Trail-Setup.exe --clobber

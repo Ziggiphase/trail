@@ -67,6 +67,14 @@ QPushButton#Primary:hover {{ background: {ACCENT_HOVER}; }}
 QPushButton#Danger {{ color: {DANGER}; }}
 QPushButton#Icon {{ padding: 6px; border-radius: 7px; background: transparent; border: none; }}
 QPushButton#Icon:hover {{ background: {SURFACE_2}; }}
+QPushButton#Google {{ background: #ffffff; color: #1f2328; border: 1px solid #ffffff;
+                      font-weight: 600; font-size: 14px; }}
+QPushButton#Google:hover {{ background: #eef1f5; }}
+QPushButton#Google:disabled {{ background: #9aa3ae; color: #3a4048; }}
+QPushButton#Link {{ background: transparent; border: none; color: {ACCENT_HOVER}; padding: 2px 4px; }}
+QPushButton#Link:hover {{ text-decoration: underline; }}
+QPushButton#Update {{ background: #12361f; border: 1px solid #2ea043; color: #7ee2a0; font-weight: 600; }}
+QPushButton#Update:hover {{ background: #174628; }}
 QPushButton::menu-indicator {{ image: none; width: 0; }}
 
 /* ---- inputs ---- */

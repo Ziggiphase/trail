@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trail · Your deep work, made visible</title>
+  <meta name="description" content="Trail is a free Windows app that tracks the time you spend in your work tools and turns it into a GitHub-style trail of green squares, with goals and streaks.">
+  <meta property="og:title" content="Trail · Your deep work, made visible">
+  <meta property="og:description" content="Small daily decisions, made visible. A free deep-work tracker for Windows.">
+  <meta property="og:image" content="assets/dashboard.webp">
+  <link rel="icon" href="assets/favicon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+  <div class="wrap">
+    <a class="brand" href="./"><img src="assets/logo.png" alt="">Trail</a>
+    <div class="links">
+      <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="#how">How it works</a>
+      <a class="hide-sm" href="#faq">FAQ</a>
+      <a href="https://github.com/Ziggiphase/trail">GitHub</a>
+      <a class="btn primary small dl-link" href="https://github.com/Ziggiphase/trail/releases/latest/download/Trail-Setup.exe">Download</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="trail-bg" id="trail-bg" aria-hidden="true"></div>
+  <div class="wrap" style="position:relative">
+    <div class="pill"><span class="dot"></span><span id="version-pill">Free for Windows 10 &amp; 11</span></div>
+    <h1>Small daily decisions,<br><span class="grad">made visible.</span></h1>
+    <p class="lead">Trail quietly counts the time you spend in your real work tools, such as VS Code, terminals,
+      Docker and Jupyter, and turns every focused day into a green square. Watch your trail grow.</p>
+    <div class="cta">
+      <a class="btn primary dl-link" href="https://github.com/Ziggiphase/trail/releases/latest/download/Trail-Setup.exe">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19h14"/></svg>
+        Download for Windows</a>
+      <a class="btn" href="https://github.com/Ziggiphase/trail">View the code</a>
+    </div>
+    <div class="meta"><span id="version-meta">Latest version</span> · Free · Updates itself automatically</div>
+    <div class="shot"><div class="bar"><i></i><i></i><i></i></div>
+      <img src="assets/dashboard.webp" alt="Trail dashboard with today's goal, weekly chart and a year of green squares" width="1260" height="820"></div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <div class="section-title"><h2>Built for people who make things</h2>
+      <p>No timers to start. No forms to fill in. Trail notices when you're actually working.</p></div>
+    <div class="grid">
+      <div class="card"><div class="icon g"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="17" rx="2.5"/><path d="M3 9h18M7 13h2M11 13h2M15 13h2M7 17h2M11 17h2"/></svg></div>
+        <h3>A year of green squares</h3><p>A contribution graph for your focus. Click any day to see what you worked in.</p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l9 4.5-9 4.5-9-4.5z"/><path d="M3 12l9 4.5 9-4.5M3 16.5l9 4.5 9-4.5"/></svg></div>
+        <h3>You choose what counts</h3><p>Pick your tools. Count a browser only while it shows Jupyter or Colab.</p></div>
+      <div class="card"><div class="icon y"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21c4 0 6.5-2.6 6.5-6.3 0-3.7-3-6-4.3-9.7-1.5 2.2-2.2 3.6-2.2 5.5-1.3-.8-2-2-2.2-3.5C8 9 5.5 11.5 5.5 14.7 5.5 18.4 8 21 12 21z"/></svg></div>
+        <h3>Goals and streaks</h3><p>Set a daily goal, keep your streak alive, and get a gentle nudge in the evening.</p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></div>
+        <h3>Honest time</h3><p>Stops counting when you step away from the keyboard. Sleep and breaks never count.</p></div>
+      <div class="card"><div class="icon g"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 18h10a4 4 0 0 0 .5-8A6 6 0 0 0 6 9.5 4.3 4.3 0 0 0 7 18z"/></svg></div>
+        <h3>Every computer, one trail</h3><p>Sign in with Google or email. Your history is saved and combined across PCs.</p></div>
+      <div class="card"><div class="icon y"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6z"/></svg></div>
+        <h3>Private by design</h3><p>Only app names and minutes are stored. Never keystrokes, screenshots or window titles.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="how" style="padding-top:20px">
+  <div class="wrap">
+    <div class="section-title"><h2>Up and running in a minute</h2></div>
+    <div class="steps">
+      <div class="card step"><h3>Install</h3><p>Download Trail-Setup.exe and run it. No admin rights needed. Trail starts with Windows and lives in your system tray.</p></div>
+      <div class="card step"><h3>Pick your apps</h3><p>Tick the tools that count as deep work. Change them anytime, or switch one off for a while.</p></div>
+      <div class="card step"><h3>Watch your trail grow</h3><p>Just work. Trail fills in the squares, tracks your streak and tells you when you hit your goal.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap split">
+    <div>
+      <h2>See exactly where your hours went</h2>
+      <p>Trail breaks every day down by app, so you can see how much was coding, how much was
+        notebooks, and how your weeks and months compare.</p>
+      <ul><li>Today vs your goal, at a glance</li><li>Last 7 days and monthly totals</li>
+        <li>Best streak and active days this year</li><li>Export everything to CSV, anytime</li></ul>
+    </div>
+    <div class="shot"><div class="bar"><i></i><i></i><i></i></div><img src="assets/activity.webp" alt="Trail activity page" loading="lazy" width="1260" height="820"></div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap split">
+    <div class="shot"><div class="bar"><i></i><i></i><i></i></div><img src="assets/apps.webp" alt="Trail tracked apps page" loading="lazy" width="1260" height="820"></div>
+    <div>
+      <h2>Your tools, your rules</h2>
+      <p>Switch apps on and off, see which one is counting right now, and add the ones you
+        used recently with a single click.</p>
+      <ul><li>Live "Counting now" status</li><li>Window-title rules for browsers</li>
+        <li>Pause for 30 minutes, an hour, or until tomorrow</li></ul>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap" style="max-width:780px">
+    <div class="section-title"><h2>Questions</h2></div>
+    <details><summary>Windows says "Windows protected your PC". Is Trail safe?</summary>
+      <p>Windows shows this for new apps that aren't code-signed yet. Click <b>More info</b>, then <b>Run anyway</b>.
+        Trail's full source code is public on <a href="https://github.com/Ziggiphase/trail">GitHub</a>, and the installer is
+        built there automatically from that code.</p></details>
+    <details><summary>Do I need an account?</summary>
+      <p>No. You can use Trail without one and your time stays on your PC. Signing in with Google or email
+        saves your history safely and combines it across your computers.</p></details>
+    <details><summary>What exactly does Trail record?</summary>
+      <p>For each day: which of your chosen apps you used and for how many minutes. Nothing else. See the
+        <a href="privacy.html">privacy policy</a> for details.</p></details>
+    <details><summary>How do updates work?</summary>
+      <p>Trail checks for new versions by itself. When one is ready, an <b>Update</b> button appears; one click
+        installs it and Trail reopens a few seconds later with your settings and history intact.</p></details>
+    <details><summary>Does it work on Mac or Linux?</summary>
+      <p>The installer is Windows-only for now. The code runs on macOS and Linux from source.</p></details>
+  </div>
+</section>
+
+<section class="final">
+  <div class="wrap">
+    <div class="section-title" style="margin-bottom:26px"><h2>Start your trail today</h2>
+      <p>Free, private, and it updates itself.</p></div>
+    <a class="btn primary dl-link" href="https://github.com/Ziggiphase/trail/releases/latest/download/Trail-Setup.exe">Download for Windows</a>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© <span id="year">2026</span> Trail · Open source under the MIT license</span>
+    <span><a href="privacy.html">Privacy</a> · <a href="https://github.com/Ziggiphase/trail">GitHub</a> ·
+      <a href="https://github.com/Ziggiphase/trail/releases">Release notes</a></span>
+  </div>
+</footer>
+
+<script>
+  // decorative background trail
+  const bg = document.getElementById("trail-bg");
+  const heat = ["--heat-0", "--heat-1", "--heat-2", "--heat-3", "--heat-4"];
+  for (let i = 0; i < 900; i++) {
+    const s = document.createElement("span");
+    const r = Math.random();
+    s.style.background = `var(${heat[r < .35 ? 0 : r < .55 ? 1 : r < .72 ? 2 : r < .88 ? 3 : 4]})`;
+    bg.appendChild(s);
+  }
+  document.getElementById("year").textContent = new Date().getFullYear();
+
+  // show the latest version and link straight to its installer
+  fetch("https://api.github.com/repos/Ziggiphase/trail/releases/latest")
+    .then(r => r.ok ? r.json() : null)
+    .then(rel => {
+      if (!rel) return;
+      const asset = (rel.assets || []).find(a => a.name === "Trail-Setup.exe");
+      const v = rel.tag_name.replace(/^v/, "");
+      document.getElementById("version-pill").textContent = `Version ${v} · Free for Windows 10 & 11`;
+      document.getElementById("version-meta").textContent = `Version ${v}`;
+      if (asset) document.querySelectorAll(".dl-link").forEach(a => a.href = asset.browser_download_url);
+    })
+    .catch(() => {});
+</script>
+</body>
+</html>

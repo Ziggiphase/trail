@@ -1,6 +1,6 @@
 PySide6>=6.7
 psutil>=5.9
-psycopg[binary]>=3.2
-python-dotenv>=1.0
+requests>=2.31
+psycopg[binary]>=3.2      # only for importing history from an old Neon database
 pyobjc-framework-Cocoa>=10; sys_platform == "darwin"
 pyobjc-framework-Quartz>=10; sys_platform == "darwin"
